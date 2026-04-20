@@ -1,11 +1,12 @@
 
- <!DOCTYPE html>
- <html lang="vi">
- <head>
-     <meta charset="UTF-8">
-     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-     <title>Hệ Thống Quản Lý Xe Giao Hàng Tự Động (Static)</title>
-     <style>
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Hệ Thống Quản Lý Xe Giao Hàng Tự Động - Gimcheon University</title>
+    <script src="https://maps.googleapis.com/maps/api/js?key=YOUR_API_KEY&libraries=geometry"></script>
+    <style>
          * {
              margin: 0;
              padding: 0;
@@ -58,10 +59,52 @@
          
          #map {
              width: 100%;
-             height: 400px;
+             height: 500px;
              background: #e9ecef;
              border-radius: 5px;
              border: 2px solid #dee2e6;
+         }
+
+         .map-3d-controls {
+             margin: 10px 0;
+             display: flex;
+             gap: 10px;
+             align-items: center;
+         }
+
+         .map-3d-controls button {
+             padding: 8px 12px;
+             border: none;
+             border-radius: 5px;
+             background: #667eea;
+             color: white;
+             cursor: pointer;
+         }
+
+         .map-3d-controls button:hover {
+             background: #5568d3;
+         }
+
+         .waypoint-marker {
+             background: #ff6b6b;
+             border: 2px solid white;
+             border-radius: 50%;
+             width: 20px;
+             height: 20px;
+             cursor: pointer;
+             box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+         }
+
+         .vehicle-marker {
+             background: #27ae60;
+             border: 3px solid white;
+             border-radius: 50%;
+             width: 24px;
+             height: 24px;
+             cursor: pointer;
+             box-shadow: 0 2px 6px rgba(0,0,0,0.4);
+             transform: rotate(0deg);
+             transition: transform 0.3s ease;
          }
          
          button {
@@ -221,8 +264,14 @@
          <div class="main-grid">
              <div>
                  <div class="panel">
-                     <h2>📍 Bản Đồ</h2>
-                     <canvas id="map"></canvas>
+                     <h2>�️ Bản Đồ 3D - Gimcheon University</h2>
+                     <div class="map-3d-controls">
+                         <button onclick="toggleMapView()">Chuyển đổi 2D/3D</button>
+                         <button onclick="centerOnUniversity()">Trung tâm Đại học</button>
+                         <button onclick="resetView()">Đặt lại</button>
+                         <span id="mapMode">Chế độ: 2D</span>
+                     </div>
+                     <div id="map"></div>
                  </div>
                  
                  <div class="panel">
@@ -306,95 +355,84 @@
      </div>
      
      <script>
-        const canvas = document.getElementById('map');
-        const ctx = canvas.getContext('2d');
-        const directions = ['Bắc', 'Đông', 'Nam', 'Tây'];
-        const gridSize = 10;
-        const mapRange = 30;
-        let missionTimer = null;
+        // Tọa độ Gimcheon University (ước tính)
+        const GIMCHEON_UNIVERSITY = { lat: 36.1466, lng: 128.3942 };
+
+        let map;
+        let vehicleMarker;
+        let waypoints = [];
+        let waypointMarkers = [];
+        let directionsService;
+        let directionsRenderer;
+        let is3DMode = false;
 
         const state = {
-            x: 1,
-            y: 1,
-            dirIndex: 1,
+            x: GIMCHEON_UNIVERSITY.lat,
+            y: GIMCHEON_UNIVERSITY.lng,
             battery: 100,
             status: 'idle',
-            lineSensors: [0, 1, 0],
-            distanceSensors: [25, 40, 25],
             waypoints: [
-                { x: 8, y: 2 },
-                { x: 7, y: 8 },
-                { x: 2, y: 7 }
+                { lat: 36.1470, lng: 128.3950, name: "Ký túc xá A" },
+                { lat: 36.1460, lng: 128.3930, name: "Nhà ăn chính" },
+                { lat: 36.1455, lng: 128.3955, name: "Thư viện" }
             ],
             currentWaypoint: 0,
-            missionPaused: false
+            missionPaused: false,
+            autoMode: false
         };
 
-        function resizeCanvas() {
-             canvas.width = canvas.offsetWidth;
-             canvas.height = canvas.offsetHeight;
-            renderMap();
-        }
-
-        function drawGrid() {
-            ctx.clearRect(0, 0, canvas.width, canvas.height);
-            ctx.fillStyle = '#e9ecef';
-             ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-            ctx.strokeStyle = '#c8d2dc';
-             ctx.lineWidth = 1;
-
-            for (let i = 0; i <= gridSize; i++) {
-                const x = (i / gridSize) * canvas.width;
-                const y = (i / gridSize) * canvas.height;
-                 ctx.beginPath();
-                 ctx.moveTo(x, 0);
-                 ctx.lineTo(x, canvas.height);
-                 ctx.stroke();
-                 ctx.beginPath();
-                 ctx.moveTo(0, y);
-                 ctx.lineTo(canvas.width, y);
-                 ctx.stroke();
-             }
-        }
-
-        function mapToPixel(value) {
-            return ((value - 1) / (gridSize - 1)) * canvas.width;
-        }
-
-        function renderMap() {
-            drawGrid();
-            drawWaypoints();
-            drawRobot();
-        }
-
-        function drawWaypoints() {
-            state.waypoints.forEach((wp, idx) => {
-                const x = mapToPixel(wp.x);
-                const y = mapToPixel(wp.y);
-                ctx.fillStyle = idx === state.currentWaypoint ? '#27ae60' : '#667eea';
-                ctx.beginPath();
-                ctx.arc(x, y, 8, 0, Math.PI * 2);
-                ctx.fill();
-                ctx.fillStyle = '#fff';
-                ctx.font = 'bold 12px Arial';
-                ctx.textAlign = 'center';
-                ctx.textBaseline = 'middle';
-                ctx.fillText(idx + 1, x, y);
+        function initMap() {
+            // Khởi tạo bản đồ với Gimcheon University làm trung tâm
+            map = new google.maps.Map(document.getElementById('map'), {
+                zoom: 17,
+                center: GIMCHEON_UNIVERSITY,
+                mapTypeId: 'satellite',
+                tilt: 0, // Bắt đầu ở chế độ 2D
+                heading: 0
             });
-         }
 
-        function drawRobot() {
-            const x = mapToPixel(state.x);
-            const y = mapToPixel(state.y);
-            ctx.save();
-            ctx.translate(x, y);
-            ctx.rotate((state.dirIndex * Math.PI) / 2);
-            ctx.fillStyle = '#ff6b6b';
-            ctx.fillRect(-14, -12, 28, 24);
-            ctx.fillStyle = '#fff';
-            ctx.fillRect(0, -6, 14, 12);
-            ctx.restore();
+            directionsService = new google.maps.DirectionsService();
+            directionsRenderer = new google.maps.DirectionsRenderer({
+                map: map,
+                suppressMarkers: true
+            });
+
+            // Thêm marker cho xe
+            vehicleMarker = new google.maps.Marker({
+                position: GIMCHEON_UNIVERSITY,
+                map: map,
+                title: 'Xe giao hàng',
+                icon: {
+                    url: 'data:image/svg+xml;charset=UTF-8,' + encodeURIComponent(`
+                        <svg width="24" height="24" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                            <circle cx="12" cy="12" r="10" fill="#27ae60" stroke="white" stroke-width="2"/>
+                            <path d="M8 12l2 2 4-4" stroke="white" stroke-width="2" fill="none"/>
+                        </svg>
+                    `),
+                    scaledSize: new google.maps.Size(24, 24)
+                }
+            });
+
+            // Thêm waypoints mặc định
+            state.waypoints.forEach((wp, index) => {
+                addWaypointMarker(wp, index);
+            });
+
+            // Sự kiện click để thêm waypoint
+            map.addListener('click', function(event) {
+                if (!state.autoMode) {
+                    const newWaypoint = {
+                        lat: event.latLng.lat(),
+                        lng: event.latLng.lng(),
+                        name: `Điểm ${waypoints.length + 1}`
+                    };
+                    addWaypointMarker(newWaypoint, waypoints.length);
+                    waypoints.push(newWaypoint);
+                    updateWaypointList();
+                }
+            });
+
+            updateDashboard();
         }
 
         function updateDashboard() {
